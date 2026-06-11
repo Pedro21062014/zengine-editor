@@ -1,0 +1,889 @@
+     1→'use client'
+     2→
+     3→import { useState, useMemo, useRef, useEffect } from 'react'
+     4→import { useGameStore, selectActiveScene, type GameObject3D, type GameObjectType } from '@/lib/game-store'
+     5→import { ScrollArea } from '@/components/ui/scroll-area'
+     6→import { Button } from '@/components/ui/button'
+     7→import { Input } from '@/components/ui/input'
+     8→import { Separator } from '@/components/ui/separator'
+     9→import {
+    10→  DropdownMenu,
+    11→  DropdownMenuContent,
+    12→  DropdownMenuGroup,
+    13→  DropdownMenuItem,
+    14→  DropdownMenuLabel,
+    15→  DropdownMenuSeparator,
+    16→  DropdownMenuTrigger,
+    17→  DropdownMenuSub,
+    18→  DropdownMenuSubContent,
+    19→  DropdownMenuSubTrigger,
+    20→} from '@/components/ui/dropdown-menu'
+    21→import {
+    22→  ContextMenu,
+    23→  ContextMenuContent,
+    24→  ContextMenuItem,
+    25→  ContextMenuSeparator,
+    26→  ContextMenuTrigger,
+    27→} from '@/components/ui/context-menu'
+    28→import {
+    29→  Select,
+    30→  SelectContent,
+    31→  SelectItem,
+    32→  SelectTrigger,
+    33→  SelectValue,
+    34→} from '@/components/ui/select'
+    35→import {
+    36→  Eye,
+    37→  EyeOff,
+    38→  Lock,
+    39→  Unlock,
+    40→  Plus,
+    41→  Search,
+    42→  ChevronRight,
+    43→  ChevronDown,
+    44→  Box,
+    45→  Circle,
+    46→  Triangle,
+    47→  Diamond,
+    48→  Hexagon,
+    49→  Cylinder,
+    50→  Cone,
+    51→  Star,
+    52→  Lightbulb,
+    53→  Sun,
+    54→  Camera,
+    55→  CircleDot,
+    56→  Trash2,
+    57→  Copy,
+    58→  Edit3,
+    59→  ArrowUp,
+    60→  ArrowDown,
+    61→  MoveRight,
+    62→  FolderPlus,
+    63→} from 'lucide-react'
+    64→
+    65→// ============================================================================
+    66→// Object type configuration
+    67→// ============================================================================
+    68→
+    69→interface ObjectTypeConfig {
+    70→  label: string
+    71→  icon: React.ElementType
+    72→  category: 'mesh' | 'light' | 'other'
+    73→}
+    74→
+    75→const OBJECT_TYPES: Record<string, ObjectTypeConfig> = {
+    76→  cube: { label: 'Cube', icon: Box, category: 'mesh' },
+    77→  sphere: { label: 'Sphere', icon: Circle, category: 'mesh' },
+    78→  cylinder: { label: 'Cylinder', icon: Cylinder, category: 'mesh' },
+    79→  cone: { label: 'Cone', icon: Cone, category: 'mesh' },
+    80→  torus: { label: 'Torus', icon: Circle, category: 'mesh' },
+    81→  plane: { label: 'Plane', icon: Triangle, category: 'mesh' },
+    82→  capsule: { label: 'Capsule', icon: Cylinder, category: 'mesh' },
+    83→  ring: { label: 'Ring', icon: Circle, category: 'mesh' },
+    84→  icosahedron: { label: 'Icosahedron', icon: Diamond, category: 'mesh' },
+    85→  octahedron: { label: 'Octahedron', icon: Diamond, category: 'mesh' },
+    86→  dodecahedron: { label: 'Dodecahedron', icon: Hexagon, category: 'mesh' },
+    87→  tetrahedron: { label: 'Tetrahedron', icon: Triangle, category: 'mesh' },
+    88→  torus_knot: { label: 'Torus Knot', icon: Star, category: 'mesh' },
+    89→  directional_light: { label: 'Directional Light', icon: Sun, category: 'light' },
+    90→  point_light: { label: 'Point Light', icon: Lightbulb, category: 'light' },
+    91→  spot_light: { label: 'Spot Light', icon: Lightbulb, category: 'light' },
+    92→  ambient_light: { label: 'Ambient Light', icon: Sun, category: 'light' },
+    93→  camera: { label: 'Camera', icon: Camera, category: 'other' },
+    94→  empty: { label: 'Empty', icon: CircleDot, category: 'other' },
+    95→}
+    96→
+    97→const DEFAULT_COLORS: Record<string, string> = {
+    98→  cube: '#4a90d9',
+    99→  sphere: '#5cb85c',
+   100→  cylinder: '#f0ad4e',
+   101→  cone: '#d9534f',
+   102→  torus: '#9b59b6',
+   103→  plane: '#95a5a6',
+   104→  capsule: '#1abc9c',
+   105→  ring: '#e67e22',
+   106→  icosahedron: '#2ecc71',
+   107→  octahedron: '#3498db',
+   108→  dodecahedron: '#e74c3c',
+   109→  tetrahedron: '#f39c12',
+   110→  torus_knot: '#8e44ad',
+   111→  directional_light: '#fffbe6',
+   112→  point_light: '#ffe0b2',
+   113→  spot_light: '#ffcc80',
+   114→  ambient_light: '#fff9c4',
+   115→  camera: '#80cbc4',
+   116→  empty: '#bdbdbd',
+   117→}
+   118→
+   119→const MESH_TYPES: GameObjectType[] = [
+   120→  'cube', 'sphere', 'cylinder', 'cone', 'torus', 'plane',
+   121→  'capsule', 'ring', 'icosahedron', 'octahedron', 'dodecahedron',
+   122→  'tetrahedron', 'torus_knot',
+   123→]
+   124→
+   125→const LIGHT_TYPES: GameObjectType[] = [
+   126→  'directional_light', 'point_light', 'spot_light', 'ambient_light',
+   127→]
+   128→
+   129→const OTHER_TYPES: GameObjectType[] = ['camera', 'empty']
+   130→
+   131→// ============================================================================
+   132→// Helper: build tree structure from flat list
+   133→// ============================================================================
+   134→
+   135→interface TreeNode {
+   136→  object: GameObject3D
+   137→  children: TreeNode[]
+   138→}
+   139→
+   140→function buildTree(objects: GameObject3D[]): TreeNode[] {
+   141→  const map = new Map<string, TreeNode>()
+   142→  const roots: TreeNode[] = []
+   143→
+   144→  // Create a node for each object
+   145→  for (const obj of objects) {
+   146→    map.set(obj.id, { object: obj, children: [] })
+   147→  }
+   148→
+   149→  // Link children to parents
+   150→  for (const obj of objects) {
+   151→    const node = map.get(obj.id)!
+   152→    if (obj.parentId && map.has(obj.parentId)) {
+   153→      map.get(obj.parentId)!.children.push(node)
+   154→    } else {
+   155→      roots.push(node)
+   156→    }
+   157→  }
+   158→
+   159→  return roots
+   160→}
+   161→
+   162→// ============================================================================
+   163→// Tree Item Component
+   164→// ============================================================================
+   165→
+   166→interface TreeItemProps {
+   167→  node: TreeNode
+   168→  depth: number
+   169→  selectedObjectId: string | null
+   170→  expandedIds: Set<string>
+   171→  onToggleExpand: (id: string) => void
+   172→  onSelect: (id: string) => void
+   173→  onToggleVisibility: (id: string) => void
+   174→  onToggleLock: (id: string) => void
+   175→  onRename: (id: string, currentName: string) => void
+   176→  onDuplicate: (id: string) => void
+   177→  onDelete: (id: string) => void
+   178→  onAddChild: (parentId: string) => void
+   179→  onMoveUp: (id: string) => void
+   180→  onMoveDown: (id: string) => void
+   181→  onReparent: (id: string, direction: 'in' | 'out') => void
+   182→  allObjects: GameObject3D[]
+   183→  renamingId: string | null
+   184→  renamingValue: string
+   185→  onRenamingValueChange: (value: string) => void
+   186→  onRenamingCommit: () => void
+   187→  onRenamingCancel: () => void
+   188→}
+   189→
+   190→function TreeItem({
+   191→  node,
+   192→  depth,
+   193→  selectedObjectId,
+   194→  expandedIds,
+   195→  onToggleExpand,
+   196→  onSelect,
+   197→  onToggleVisibility,
+   198→  onToggleLock,
+   199→  onRename,
+   200→  onDuplicate,
+   201→  onDelete,
+   202→  onAddChild,
+   203→  onMoveUp,
+   204→  onMoveDown,
+   205→  onReparent,
+   206→  allObjects,
+   207→  renamingId,
+   208→  renamingValue,
+   209→  onRenamingValueChange,
+   210→  onRenamingCommit,
+   211→  onRenamingCancel,
+   212→}: TreeItemProps) {
+   213→  const { object } = node
+   214→  const isSelected = selectedObjectId === object.id
+   215→  const isExpanded = expandedIds.has(object.id)
+   216→  const hasChildren = node.children.length > 0
+   217→  const isRenaming = renamingId === object.id
+   218→  const typeConfig = OBJECT_TYPES[object.type]
+   219→  const IconComponent = typeConfig?.icon ?? Box
+   220→
+   221→  const handleKeyDown = useCallback(
+   222→    (e: React.KeyboardEvent) => {
+   223→      if (e.key === 'Enter') {
+   224→        e.preventDefault()
+   225→        onRenamingCommit()
+   226→      } else if (e.key === 'Escape') {
+   227→        e.preventDefault()
+   228→        onRenamingCancel()
+   229→      }
+   230→    },
+   231→    [onRenamingCommit, onRenamingCancel]
+   232→  )
+   233→
+   234→  const handleContextMenuAddChild = useCallback(() => {
+   235→    onAddChild(object.id)
+   236→  }, [onAddChild, object.id])
+   237→
+   238→  const handleContextMenuRename = useCallback(() => {
+   239→    onRename(object.id, object.name)
+   240→  }, [onRename, object.id, object.name])
+   241→
+   242→  const handleContextMenuDuplicate = useCallback(() => {
+   243→    onDuplicate(object.id)
+   244→  }, [onDuplicate, object.id])
+   245→
+   246→  const handleContextMenuDelete = useCallback(() => {
+   247→    onDelete(object.id)
+   248→  }, [onDelete, object.id])
+   249→
+   250→  const handleMoveUp = useCallback(() => {
+   251→    onMoveUp(object.id)
+   252→  }, [onMoveUp, object.id])
+   253→
+   254→  const handleMoveDown = useCallback(() => {
+   255→    onMoveDown(object.id)
+   256→  }, [onMoveDown, object.id])
+   257→
+   258→  const handleReparentIn = useCallback(() => {
+   259→    onReparent(object.id, 'in')
+   260→  }, [onReparent, object.id])
+   261→
+   262→  const handleReparentOut = useCallback(() => {
+   263→    onReparent(object.id, 'out')
+   264→  }, [onReparent, object.id])
+   265→
+   266→  const handleClick = useCallback(() => {
+   267→    onSelect(object.id)
+   268→  }, [onSelect, object.id])
+   269→
+   270→  const handleToggleExpand = useCallback(
+   271→    (e: React.MouseEvent) => {
+   272→      e.stopPropagation()
+   273→      onToggleExpand(object.id)
+   274→    },
+   275→    [onToggleExpand, object.id]
+   276→  )
+   277→
+   278→  const handleToggleVisibility = useCallback(
+   279→    (e: React.MouseEvent) => {
+   280→      e.stopPropagation()
+   281→      onToggleVisibility(object.id)
+   282→    },
+   283→    [onToggleVisibility, object.id]
+   284→  )
+   285→
+   286→  const handleToggleLock = useCallback(
+   287→    (e: React.MouseEvent) => {
+   288→      e.stopPropagation()
+   289→      onToggleLock(object.id)
+   290→    },
+   291→    [onToggleLock, object.id]
+   292→  )
+   293→
+   294→  return (
+   295→    <>
+   296→      <ContextMenu>
+   297→        <ContextMenuTrigger asChild>
+   298→          <div
+   299→            role="treeitem"
+   300→            aria-selected={isSelected}
+   301→            aria-expanded={hasChildren ? isExpanded : undefined}
+   302→            className={`
+   303→              flex items-center gap-1 py-1 px-1 rounded-sm cursor-pointer select-none
+   304→              transition-colors duration-75 group
+   305→              ${isSelected
+   306→                ? 'bg-primary/15 text-primary-foreground'
+   307→                : 'hover:bg-muted/60'}
+   308→              ${object.locked ? 'opacity-60' : ''}
+   309→            `}
+   310→            style={{ paddingLeft: `${depth * 16 + 4}px` }}
+   311→            onClick={handleClick}
+   312→          >
+   313→            {/* Expand/collapse chevron */}
+   314→            <button
+   315→              type="button"
+   316→              className={`
+   317→                flex-shrink-0 w-4 h-4 flex items-center justify-center rounded-sm
+   318→                hover:bg-muted transition-colors
+   319→                ${hasChildren ? '' : 'invisible'}
+   320→              `}
+   321→              onClick={handleToggleExpand}
+   322→              tabIndex={-1}
+   323→            >
+   324→              {hasChildren && (
+   325→                isExpanded
+   326→                  ? <ChevronDown className="w-3 h-3 text-muted-foreground" />
+   327→                  : <ChevronRight className="w-3 h-3 text-muted-foreground" />
+   328→              )}
+   329→            </button>
+   330→
+   331→            {/* Type icon */}
+   332→            <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
+   333→              <IconComponent className="w-3.5 h-3.5 text-muted-foreground" />
+   334→            </div>
+   335→
+   336→            {/* Name */}
+   337→            <div className="flex-1 min-w-0">
+   338→              {isRenaming ? (
+   339→                <input
+   340→                  type="text"
+   341→                  value={renamingValue}
+   342→                  onChange={(e) => onRenamingValueChange(e.target.value)}
+   343→                  onKeyDown={handleKeyDown}
+   344→                  onBlur={onRenamingCommit}
+   345→                  autoFocus
+   346→                  className="w-full bg-background border border-ring rounded px-1 py-0 text-xs outline-none"
+   347→                  onClick={(e) => e.stopPropagation()}
+   348→                />
+   349→              ) : (
+   350→                <span className="text-xs truncate block">{object.name}</span>
+   351→              )}
+   352→            </div>
+   353→
+   354→            {/* Visibility toggle */}
+   355→            <button
+   356→              type="button"
+   357→              className={`
+   358→                flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-sm
+   359→                opacity-0 group-hover:opacity-100 transition-opacity
+   360→                hover:bg-muted
+   361→              `}
+   362→              onClick={handleToggleVisibility}
+   363→              tabIndex={-1}
+   364→            >
+   365→              {object.visible
+   366→                ? <Eye className="w-3 h-3 text-muted-foreground" />
+   367→                : <EyeOff className="w-3 h-3 text-destructive" />
+   368→              }
+   369→            </button>
+   370→
+   371→            {/* Lock toggle */}
+   372→            <button
+   373→              type="button"
+   374→              className={`
+   375→                flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-sm
+   376→                opacity-0 group-hover:opacity-100 transition-opacity
+   377→                hover:bg-muted
+   378→              `}
+   379→              onClick={handleToggleLock}
+   380→              tabIndex={-1}
+   381→            >
+   382→              {object.locked
+   383→                ? <Lock className="w-3 h-3 text-destructive" />
+   384→                : <Unlock className="w-3 h-3 text-muted-foreground" />
+   385→              }
+   386→            </button>
+   387→          </div>
+   388→        </ContextMenuTrigger>
+   389→
+   390→        <ContextMenuContent className="w-52">
+   391→          <ContextMenuItem onClick={handleContextMenuRename}>
+   392→            <Edit3 className="mr-2 h-4 w-4" />
+   393→            Rename
+   394→          </ContextMenuItem>
+   395→          <ContextMenuItem onClick={handleContextMenuDuplicate}>
+   396→            <Copy className="mr-2 h-4 w-4" />
+   397→            Duplicate
+   398→          </ContextMenuItem>
+   399→          <ContextMenuItem onClick={handleContextMenuAddChild}>
+   400→            <FolderPlus className="mr-2 h-4 w-4" />
+   401→            Add Child Object
+   402→          </ContextMenuItem>
+   403→          <ContextMenuSeparator />
+   404→          <ContextMenuItem onClick={handleMoveUp}>
+   405→            <ArrowUp className="mr-2 h-4 w-4" />
+   406→            Move Up
+   407→          </ContextMenuItem>
+   408→          <ContextMenuItem onClick={handleMoveDown}>
+   409→            <ArrowDown className="mr-2 h-4 w-4" />
+   410→            Move Down
+   411→          </ContextMenuItem>
+   412→          <ContextMenuItem onClick={handleReparentIn}>
+   413→            <MoveRight className="mr-2 h-4 w-4 rotate-[-90deg]" />
+   414→            Reparent In
+   415→          </ContextMenuItem>
+   416→          <ContextMenuItem onClick={handleReparentOut}>
+   417→            <MoveRight className="mr-2 h-4 w-4 rotate-90" />
+   418→            Reparent Out
+   419→          </ContextMenuItem>
+   420→          <ContextMenuSeparator />
+   421→          <ContextMenuItem onClick={handleContextMenuDelete} variant="destructive">
+   422→            <Trash2 className="mr-2 h-4 w-4" />
+   423→            Delete
+   424→          </ContextMenuItem>
+   425→        </ContextMenuContent>
+   426→      </ContextMenu>
+   427→
+   428→      {/* Render children if expanded */}
+   429→      {hasChildren && isExpanded && (
+   430→        <div role="group">
+   431→          {node.children.map((child) => (
+   432→            <TreeItem
+   433→              key={child.object.id}
+   434→              node={child}
+   435→              depth={depth + 1}
+   436→              selectedObjectId={selectedObjectId}
+   437→              expandedIds={expandedIds}
+   438→              onToggleExpand={onToggleExpand}
+   439→              onSelect={onSelect}
+   440→              onToggleVisibility={onToggleVisibility}
+   441→              onToggleLock={onToggleLock}
+   442→              onRename={onRename}
+   443→              onDuplicate={onDuplicate}
+   444→              onDelete={onDelete}
+   445→              onAddChild={onAddChild}
+   446→              onMoveUp={onMoveUp}
+   447→              onMoveDown={onMoveDown}
+   448→              onReparent={onReparent}
+   449→              allObjects={allObjects}
+   450→              renamingId={renamingId}
+   451→              renamingValue={renamingValue}
+   452→              onRenamingValueChange={onRenamingValueChange}
+   453→              onRenamingCommit={onRenamingCommit}
+   454→              onRenamingCancel={onRenamingCancel}
+   455→            />
+   456→          ))}
+   457→        </div>
+   458→      )}
+   459→    </>
+   460→  )
+   461→}
+   462→
+   463→// ============================================================================
+   464→// Main SceneHierarchy Component
+   465→// ============================================================================
+   466→
+   467→export default function SceneHierarchy() {
+   468→  // ---- Store selectors ----
+   469→  const scenes = useGameStore((s) => s.project.scenes)
+   470→  const activeSceneId = useGameStore((s) => s.project.activeSceneId)
+   471→  const selectedObjectId = useGameStore((s) => s.editor.selectedObjectId)
+   472→  const addGameObject = useGameStore((s) => s.addGameObject)
+   473→  const removeGameObject = useGameStore((s) => s.removeGameObject)
+   474→  const updateGameObject = useGameStore((s) => s.updateGameObject)
+   475→  const selectObject = useGameStore((s) => s.selectObject)
+   476→  const duplicateObject = useGameStore((s) => s.duplicateObject)
+   477→  const setActiveScene = useGameStore((s) => s.setActiveScene)
+   478→
+   479→  // ---- Local state ----
+   480→  const [searchQuery, setSearchQuery] = useState('')
+   481→  const [renamingId, setRenamingId] = useState<string | null>(null)
+   482→  const [renamingValue, setRenamingValue] = useState('')
+   483→  const searchInputRef = useRef<HTMLInputElement>(null)
+   484→
+   485→  // ---- Derived state ----
+   486→  const activeScene = useGameStore(selectActiveScene)
+   487→  const objects = activeScene?.objects ?? []
+   488→
+   489→  // Auto-expand root items using memoized initial state
+   490→  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
+   491→    const rootIds = objects
+   492→      .filter((obj) => !obj.parentId)
+   493→      .map((obj) => obj.id)
+   494→    return new Set(rootIds)
+   495→  })
+   496→
+   497→  // Keep expanded IDs in sync when new root objects appear
+   498→  const prevObjectCountRef = useRef(objects.length)
+   499→  if (objects.length !== prevObjectCountRef.current) {
+   500→    prevObjectCountRef.current = objects.length
+   501→    const rootIds = objects
+   502→      .filter((obj) => !obj.parentId)
+   503→      .map((obj) => obj.id)
+   504→    setExpandedIds((prev) => {
+   505→      const next = new Set(prev)
+   506→      for (const id of rootIds) {
+   507→        next.add(id)
+   508→      }
+   509→      return next
+   510→    })
+   511→  }
+   512→
+   513→  // ---- Search filtering ----
+   514→  const filteredObjects = useMemo(() => {
+   515→    if (!searchQuery.trim()) return objects
+   516→    const query = searchQuery.toLowerCase()
+   517→    const matchingIds = new Set<string>()
+   518→
+   519→    // Find objects matching the query
+   520→    for (const obj of objects) {
+   521→      if (obj.name.toLowerCase().includes(query) || obj.type.toLowerCase().includes(query)) {
+   522→        matchingIds.add(obj.id)
+   523→        // Add all ancestors
+   524→        let current = obj
+   525→        while (current.parentId) {
+   526→          matchingIds.add(current.parentId)
+   527→          current = objects.find((o) => o.id === current.parentId)!
+   528→          if (!current) break
+   529→        }
+   530→        // Add all descendants
+   531→        const addDescendants = (parentId: string) => {
+   532→          const children = objects.filter((o) => o.parentId === parentId)
+   533→          for (const child of children) {
+   534→            matchingIds.add(child.id)
+   535→            addDescendants(child.id)
+   536→          }
+   537→        }
+   538→        addDescendants(obj.id)
+   539→      }
+   540→    }
+   541→
+   542→    return objects.filter((obj) => matchingIds.has(obj.id))
+   543→  }, [objects, searchQuery])
+   544→
+   545→  // ---- Tree building ----
+   546→  const tree = useMemo(() => buildTree(filteredObjects), [filteredObjects])
+   547→
+   548→  // ---- Handlers ----
+   549→  const handleToggleExpand = (id: string) => {
+   550→    setExpandedIds((prev) => {
+   551→      const next = new Set(prev)
+   552→      if (next.has(id)) {
+   553→        next.delete(id)
+   554→      } else {
+   555→        next.add(id)
+   556→      }
+   557→      return next
+   558→    })
+   559→  }
+   560→
+   561→  const handleSelect = (id: string) => {
+   562→    selectObject(id)
+   563→  }
+   564→
+   565→  const handleToggleVisibility = (id: string) => {
+   566→    const obj = objects.find((o) => o.id === id)
+   567→    if (obj) {
+   568→      updateGameObject(id, { visible: !obj.visible })
+   569→    }
+   570→  }
+   571→
+   572→  const handleToggleLock = (id: string) => {
+   573→    const obj = objects.find((o) => o.id === id)
+   574→    if (obj) {
+   575→      updateGameObject(id, { locked: !obj.locked })
+   576→    }
+   577→  }
+   578→
+   579→  const handleRename = (id: string, currentName: string) => {
+   580→    setRenamingId(id)
+   581→    setRenamingValue(currentName)
+   582→  }
+   583→
+   584→  const handleRenamingCommit = () => {
+   585→    if (renamingId && renamingValue.trim()) {
+   586→      updateGameObject(renamingId, { name: renamingValue.trim() })
+   587→    }
+   588→    setRenamingId(null)
+   589→    setRenamingValue('')
+   590→  }
+   591→
+   592→  const handleRenamingCancel = () => {
+   593→    setRenamingId(null)
+   594→    setRenamingValue('')
+   595→  }
+   596→
+   597→  const handleDuplicate = (id: string) => {
+   598→    duplicateObject(id)
+   599→  }
+   600→
+   601→  const handleDelete = (id: string) => {
+   602→    removeGameObject(id)
+   603→  }
+   604→
+   605→  const handleAddChild = (parentId: string) => {
+   606→    const parent = objects.find((o) => o.id === parentId)
+   607→    if (!parent) return
+   608→    const newType: GameObjectType = 'empty'
+   609→    const config = OBJECT_TYPES[newType]
+   610→    addGameObject({
+   611→      name: `${config.label} ${objects.length + 1}`,
+   612→      type: newType,
+   613→      position: { x: parent.position.x, y: parent.position.y, z: parent.position.z },
+   614→      rotation: { x: 0, y: 0, z: 0 },
+   615→      scale: { x: 1, y: 1, z: 1 },
+   616→      color: DEFAULT_COLORS[newType] ?? '#888888',
+   617→      visible: true,
+   618→      locked: false,
+   619→      children: [],
+   620→      parentId: parentId,
+   621→      properties: {},
+   622→      script: '',
+   623→      material: 'standard',
+   624→      castShadow: true,
+   625→      receiveShadow: true,
+   626→    })
+   627→    // Expand parent to show the new child
+   628→    setExpandedIds((prev) => new Set(prev).add(parentId))
+   629→  }
+   630→
+   631→  const handleAddObject = (type: GameObjectType) => {
+   632→    const config = OBJECT_TYPES[type]
+   633→    if (!config) return
+   634→    addGameObject({
+   635→      name: `${config.label} ${objects.length + 1}`,
+   636→      type,
+   637→      position: { x: 0, y: 0, z: 0 },
+   638→      rotation: { x: 0, y: 0, z: 0 },
+   639→      scale: { x: 1, y: 1, z: 1 },
+   640→      color: DEFAULT_COLORS[type] ?? '#888888',
+   641→      visible: true,
+   642→      locked: false,
+   643→      children: [],
+   644→      parentId: null,
+   645→      properties: {},
+   646→      script: '',
+   647→      material: 'standard',
+   648→      castShadow: true,
+   649→      receiveShadow: true,
+   650→    })
+   651→  }
+   652→
+   653→  const handleMoveUp = (id: string) => {
+   654→    const obj = objects.find((o) => o.id === id)
+   655→    if (!obj) return
+   656→    const siblings = objects.filter((o) => o.parentId === obj.parentId)
+   657→    const index = siblings.findIndex((s) => s.id === id)
+   658→    if (index <= 0) return
+   659→    // Swap positions with the previous sibling (shift by -1 on X)
+   660→    const prevSibling = siblings[index - 1]
+   661→    updateGameObject(id, {
+   662→      position: { x: prevSibling.position.x, y: obj.position.y, z: obj.position.z },
+   663→    })
+   664→    updateGameObject(prevSibling.id, {
+   665→      position: { x: obj.position.x, y: prevSibling.position.y, z: prevSibling.position.z },
+   666→    })
+   667→    // Also visually swap in the list by selecting the moved object
+   668→    selectObject(id)
+   669→  }
+   670→
+   671→  const handleMoveDown = (id: string) => {
+   672→    const obj = objects.find((o) => o.id === id)
+   673→    if (!obj) return
+   674→    const siblings = objects.filter((o) => o.parentId === obj.parentId)
+   675→    const index = siblings.findIndex((s) => s.id === id)
+   676→    if (index < 0 || index >= siblings.length - 1) return
+   677→    const nextSibling = siblings[index + 1]
+   678→    updateGameObject(id, {
+   679→      position: { x: nextSibling.position.x, y: obj.position.y, z: obj.position.z },
+   680→    })
+   681→    updateGameObject(nextSibling.id, {
+   682→      position: { x: obj.position.x, y: nextSibling.position.y, z: nextSibling.position.z },
+   683→    })
+   684→    selectObject(id)
+   685→  }
+   686→
+   687→  const handleReparent = (id: string, direction: 'in' | 'out') => {
+   688→    const obj = objects.find((o) => o.id === id)
+   689→    if (!obj) return
+   690→
+   691→    if (direction === 'out') {
+   692→      // Move out of parent - become a root object
+   693→      if (!obj.parentId) return
+   694→      updateGameObject(id, { parentId: null })
+   695→      // Remove from old parent's children
+   696→      const oldParent = objects.find((o) => o.id === obj.parentId)
+   697→      if (oldParent) {
+   698→        updateGameObject(oldParent.id, {
+   699→          children: oldParent.children.filter((cid) => cid !== id),
+   700→        })
+   701→      }
+   702→    } else {
+   703→      // Move in - become child of the previous sibling
+   704→      const siblings = objects.filter((o) => o.parentId === obj.parentId)
+   705→      const index = siblings.findIndex((s) => s.id === id)
+   706→      if (index <= 0) return
+   707→      const newParent = siblings[index - 1]
+   708→      // Remove from old parent's children
+   709→      if (obj.parentId) {
+   710→        const oldParent = objects.find((o) => o.id === obj.parentId)
+   711→        if (oldParent) {
+   712→          updateGameObject(oldParent.id, {
+   713→            children: oldParent.children.filter((cid) => cid !== id),
+   714→          })
+   715→        }
+   716→      }
+   717→      // Set new parent
+   718→      updateGameObject(id, { parentId: newParent.id })
+   719→      updateGameObject(newParent.id, {
+   720→        children: [...newParent.children, id],
+   721→      })
+   722→      // Expand the new parent
+   723→      setExpandedIds((prev) => new Set(prev).add(newParent.id))
+   724→    }
+   725→  }
+   726→
+   727→  const handleSceneChange = (sceneId: string) => {
+   728→    setActiveScene(sceneId)
+   729→  }
+   730→
+   731→  // ---- Keyboard shortcut: focus search ----
+   732→  useEffect(() => {
+   733→    const handler = (e: KeyboardEvent) => {
+   734→      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+   735→        // Only if the hierarchy panel is likely visible
+   736→        e.preventDefault()
+   737→        searchInputRef.current?.focus()
+   738→      }
+   739→    }
+   740→    window.addEventListener('keydown', handler)
+   741→    return () => window.removeEventListener('keydown', handler)
+   742→  }, [])
+   743→
+   744→  return (
+   745→    <div className="flex flex-col h-full bg-background border-r">
+   746→      {/* Header */}
+   747→      <div className="flex items-center justify-between px-3 py-2 border-b">
+   748→        <h2 className="text-sm font-semibold tracking-tight">Scene Hierarchy</h2>
+   749→        <DropdownMenu>
+   750→          <DropdownMenuTrigger asChild>
+   751→            <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs">
+   752→              <Plus className="w-3.5 h-3.5" />
+   753→              Add
+   754→            </Button>
+   755→          </DropdownMenuTrigger>
+   756→          <DropdownMenuContent className="w-56" align="start">
+   757→            <DropdownMenuLabel>Meshes</DropdownMenuLabel>
+   758→            {MESH_TYPES.map((type) => {
+   759→              const config = OBJECT_TYPES[type]
+   760→              const Icon = config.icon
+   761→              return (
+   762→                <DropdownMenuItem
+   763→                  key={type}
+   764→                  onClick={() => handleAddObject(type)}
+   765→                >
+   766→                  <Icon className="mr-2 h-4 w-4" />
+   767→                  {config.label}
+   768→                </DropdownMenuItem>
+   769→              )
+   770→            })}
+   771→            <DropdownMenuSeparator />
+   772→            <DropdownMenuLabel>Lights</DropdownMenuLabel>
+   773→            {LIGHT_TYPES.map((type) => {
+   774→              const config = OBJECT_TYPES[type]
+   775→              const Icon = config.icon
+   776→              return (
+   777→                <DropdownMenuItem
+   778→                  key={type}
+   779→                  onClick={() => handleAddObject(type)}
+   780→                >
+   781→                  <Icon className="mr-2 h-4 w-4" />
+   782→                  {config.label}
+   783→                </DropdownMenuItem>
+   784→              )
+   785→            })}
+   786→            <DropdownMenuSeparator />
+   787→            <DropdownMenuLabel>Other</DropdownMenuLabel>
+   788→            {OTHER_TYPES.map((type) => {
+   789→              const config = OBJECT_TYPES[type]
+   790→              const Icon = config.icon
+   791→              return (
+   792→                <DropdownMenuItem
+   793→                  key={type}
+   794→                  onClick={() => handleAddObject(type)}
+   795→                >
+   796→                  <Icon className="mr-2 h-4 w-4" />
+   797→                  {config.label}
+   798→                </DropdownMenuItem>
+   799→              )
+   800→            })}
+   801→          </DropdownMenuContent>
+   802→        </DropdownMenu>
+   803→      </div>
+   804→
+   805→      {/* Scene selector */}
+   806→      {scenes.length > 1 && (
+   807→        <div className="px-3 py-2 border-b">
+   808→          <Select value={activeSceneId} onValueChange={handleSceneChange}>
+   809→            <SelectTrigger className="w-full h-7 text-xs">
+   810→              <SelectValue placeholder="Select Scene" />
+   811→            </SelectTrigger>
+   812→            <SelectContent>
+   813→              {scenes.map((scene) => (
+   814→                <SelectItem key={scene.id} value={scene.id}>
+   815→                  {scene.name}
+   816→                </SelectItem>
+   817→              ))}
+   818→            </SelectContent>
+   819→          </Select>
+   820→        </div>
+   821→      )}
+   822→
+   823→      {/* Search */}
+   824→      <div className="px-3 py-2 border-b">
+   825→        <div className="relative">
+   826→          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+   827→          <Input
+   828→            ref={searchInputRef}
+   829→            type="text"
+   830→            placeholder="Search objects..."
+   831→            value={searchQuery}
+   832→            onChange={(e) => setSearchQuery(e.target.value)}
+   833→            className="h-7 pl-7 text-xs"
+   834→          />
+   835→        </div>
+   836→      </div>
+   837→
+   838→      {/* Tree view */}
+   839→      <ScrollArea className="flex-1">
+   840→        <div className="py-1" role="tree" aria-label="Scene hierarchy">
+   841→          {tree.length === 0 ? (
+   842→            <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+   843→              <Box className="w-8 h-8 mb-2 opacity-30" />
+   844→              <p className="text-xs">
+   845→                {searchQuery ? 'No matching objects' : 'No objects in scene'}
+   846→              </p>
+   847→              {!searchQuery && (
+   848→                <p className="text-xs mt-1">Click &quot;Add&quot; to create one</p>
+   849→              )}
+   850→            </div>
+   851→          ) : (
+   852→            tree.map((node) => (
+   853→              <TreeItem
+   854→                key={node.object.id}
+   855→                node={node}
+   856→                depth={0}
+   857→                selectedObjectId={selectedObjectId}
+   858→                expandedIds={expandedIds}
+   859→                onToggleExpand={handleToggleExpand}
+   860→                onSelect={handleSelect}
+   861→                onToggleVisibility={handleToggleVisibility}
+   862→                onToggleLock={handleToggleLock}
+   863→                onRename={handleRename}
+   864→                onDuplicate={handleDuplicate}
+   865→                onDelete={handleDelete}
+   866→                onAddChild={handleAddChild}
+   867→                onMoveUp={handleMoveUp}
+   868→                onMoveDown={handleMoveDown}
+   869→                onReparent={handleReparent}
+   870→                allObjects={objects}
+   871→                renamingId={renamingId}
+   872→                renamingValue={renamingValue}
+   873→                onRenamingValueChange={setRenamingValue}
+   874→                onRenamingCommit={handleRenamingCommit}
+   875→                onRenamingCancel={handleRenamingCancel}
+   876→              />
+   877→            ))
+   878→          )}
+   879→        </div>
+   880→      </ScrollArea>
+   881→
+   882→      {/* Footer: object count */}
+   883→      <div className="px-3 py-1.5 border-t text-xs text-muted-foreground">
+   884→        {objects.length} object{objects.length !== 1 ? 's' : ''} in scene
+   885→      </div>
+   886→    </div>
+   887→  )
+   888→}
+   889→

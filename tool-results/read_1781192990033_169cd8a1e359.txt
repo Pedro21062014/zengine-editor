@@ -1,0 +1,882 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useRef, useEffect } from 'react'
+     4→     4→import * as THREE from 'three'
+     5→     5→import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+     6→     6→import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
+     7→     7→import {
+     8→     8→  useGameEditorStore,
+     9→     9→  selectActiveScene,
+    10→    10→  type GameObject3D,
+    11→    11→  type GameObjectType,
+    12→    12→  type MaterialType,
+    13→    13→} from '@/lib/game-store'
+    14→    14→
+    15→    15→// ============================================================================
+    16→    16→// Props
+    17→    17→// ============================================================================
+    18→    18→
+    19→    19→interface Viewport3DProps {
+    20→    20→  className?: string
+    21→    21→}
+    22→    22→
+    23→    23→// ============================================================================
+    24→    24→// Geometry Factory
+    25→    25→// ============================================================================
+    26→    26→
+    27→    27→const MESH_TYPES: Set<string> = new Set([
+    28→    28→  'cube',
+    29→    29→  'sphere',
+    30→    30→  'cylinder',
+    31→    31→  'cone',
+    32→    32→  'torus',
+    33→    33→  'plane',
+    34→    34→  'capsule',
+    35→    35→  'ring',
+    36→    36→  'icosahedron',
+    37→    37→  'octahedron',
+    38→    38→  'dodecahedron',
+    39→    39→  'tetrahedron',
+    40→    40→  'torus_knot',
+    41→    41→])
+    42→    42→
+    43→    43→const LIGHT_TYPES: Set<string> = new Set([
+    44→    44→  'directional_light',
+    45→    45→  'point_light',
+    46→    46→  'spot_light',
+    47→    47→  'ambient_light',
+    48→    48→])
+    49→    49→
+    50→    50→function isMeshType(type: GameObjectType): boolean {
+    51→    51→  return MESH_TYPES.has(type)
+    52→    52→}
+    53→    53→
+    54→    54→function isLightType(type: GameObjectType): boolean {
+    55→    55→  return LIGHT_TYPES.has(type)
+    56→    56→}
+    57→    57→
+    58→    58→function createGeometryForType(type: GameObjectType): THREE.BufferGeometry | null {
+    59→    59→  switch (type) {
+    60→    60→    case 'cube':
+    61→    61→      return new THREE.BoxGeometry(1, 1, 1)
+    62→    62→    case 'sphere':
+    63→    63→      return new THREE.SphereGeometry(0.5, 32, 32)
+    64→    64→    case 'cylinder':
+    65→    65→      return new THREE.CylinderGeometry(0.5, 0.5, 1, 32)
+    66→    66→    case 'cone':
+    67→    67→      return new THREE.ConeGeometry(0.5, 1, 32)
+    68→    68→    case 'torus':
+    69→    69→      return new THREE.TorusGeometry(0.5, 0.2, 16, 48)
+    70→    70→    case 'plane':
+    71→    71→      return new THREE.PlaneGeometry(1, 1)
+    72→    72→    case 'capsule':
+    73→    73→      return new THREE.CapsuleGeometry(0.3, 0.5, 16, 32)
+    74→    74→    case 'ring':
+    75→    75→      return new THREE.RingGeometry(0.3, 0.5, 32)
+    76→    76→    case 'icosahedron':
+    77→    77→      return new THREE.IcosahedronGeometry(0.5)
+    78→    78→    case 'octahedron':
+    79→    79→      return new THREE.OctahedronGeometry(0.5)
+    80→    80→    case 'dodecahedron':
+    81→    81→      return new THREE.DodecahedronGeometry(0.5)
+    82→    82→    case 'tetrahedron':
+    83→    83→      return new THREE.TetrahedronGeometry(0.5)
+    84→    84→    case 'torus_knot':
+    85→    85→      return new THREE.TorusKnotGeometry(0.4, 0.15, 100, 16)
+    86→    86→    default:
+    87→    87→      return null
+    88→    88→  }
+    89→    89→}
+    90→    90→
+    91→    91→function createMaterialForType(materialType: MaterialType, color: string): THREE.Material {
+    92→    92→  const threeColor = new THREE.Color(color)
+    93→    93→  switch (materialType) {
+    94→    94→    case 'phong':
+    95→    95→      return new THREE.MeshPhongMaterial({ color: threeColor })
+    96→    96→    case 'lambert':
+    97→    97→      return new THREE.MeshLambertMaterial({ color: threeColor })
+    98→    98→    case 'basic':
+    99→    99→      return new THREE.MeshBasicMaterial({ color: threeColor })
+   100→   100→    case 'wireframe':
+   101→   101→      return new THREE.MeshBasicMaterial({ color: threeColor, wireframe: true })
+   102→   102→    case 'standard':
+   103→   103→    default:
+   104→   104→      return new THREE.MeshStandardMaterial({ color: threeColor })
+   105→   105→  }
+   106→   106→}
+   107→   107→
+   108→   108→/** Serialize the visual-relevant properties of a GameObject3D for change detection */
+   109→   109→function serializeVisualState(obj: GameObject3D): string {
+   110→   110→  return JSON.stringify({
+   111→   111→    t: obj.type,
+   112→   112→    p: obj.position,
+   113→   113→    r: obj.rotation,
+   114→   114→    s: obj.scale,
+   115→   115→    c: obj.color,
+   116→   116→    v: obj.visible,
+   117→   117→    m: obj.material,
+   118→   118→    cs: obj.castShadow,
+   119→   119→    rs: obj.receiveShadow,
+   120→   120→  })
+   121→   121→}
+   122→   122→
+   123→   123→// ============================================================================
+   124→   124→// Component
+   125→   125→// ============================================================================
+   126→   126→
+   127→   127→export default function Viewport3D({ className }: Viewport3DProps) {
+   128→   128→  const containerRef = useRef<HTMLDivElement>(null)
+   129→   129→
+   130→   130→  useEffect(() => {
+   131→   131→    const container = containerRef.current
+   132→   132→    if (!container) return
+   133→   133→
+   134→   134→    // ================================================================
+   135→   135→    // Scene
+   136→   136→    // ================================================================
+   137→   137→    const scene = new THREE.Scene()
+   138→   138→
+   139→   139→    const initialState = useGameEditorStore.getState()
+   140→   140→    const initialScene = selectActiveScene(initialState)
+   141→   141→    scene.background = new THREE.Color(
+   142→   142→      initialScene?.environment.backgroundColor ?? '#1a1a2e'
+   143→   143→    )
+   144→   144→
+   145→   145→    // Fog
+   146→   146→    if (initialScene?.environment.fogEnabled) {
+   147→   147→      scene.fog = new THREE.FogExp2(
+   148→   148→        new THREE.Color(initialScene.environment.fogColor),
+   149→   149→        initialScene.environment.fogDensity
+   150→   150→      )
+   151→   151→    }
+   152→   152→
+   153→   153→    // ================================================================
+   154→   154→    // Camera
+   155→   155→    // ================================================================
+   156→   156→    const containerWidth = container.clientWidth || 1
+   157→   157→    const containerHeight = container.clientHeight || 1
+   158→   158→
+   159→   159→    const camera = new THREE.PerspectiveCamera(
+   160→   160→      60,
+   161→   161→      containerWidth / containerHeight,
+   162→   162→      0.1,
+   163→   163→      2000
+   164→   164→    )
+   165→   165→    const camPos = initialState.editor.cameraPosition
+   166→   166→    camera.position.set(camPos.x, camPos.y, camPos.z)
+   167→   167→    camera.lookAt(0, 0, 0)
+   168→   168→
+   169→   169→    // ================================================================
+   170→   170→    // Renderer
+   171→   171→    // ================================================================
+   172→   172→    const renderer = new THREE.WebGLRenderer({
+   173→   173→      antialias: true,
+   174→   174→      alpha: false,
+   175→   175→      powerPreference: 'high-performance',
+   176→   176→    })
+   177→   177→    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+   178→   178→    renderer.setSize(containerWidth, containerHeight)
+   179→   179→    renderer.shadowMap.enabled = true
+   180→   180→    renderer.shadowMap.type = THREE.PCFSoftShadowMap
+   181→   181→    renderer.toneMapping = THREE.ACESFilmicToneMapping
+   182→   182→    renderer.toneMappingExposure = 1.0
+   183→   183→    container.appendChild(renderer.domElement)
+   184→   184→
+   185→   185→    // ================================================================
+   186→   186→    // Orbit Controls
+   187→   187→    // ================================================================
+   188→   188→    const orbitControls = new OrbitControls(camera, renderer.domElement)
+   189→   189→    orbitControls.enableDamping = true
+   190→   190→    orbitControls.dampingFactor = 0.1
+   191→   191→    orbitControls.minDistance = 0.5
+   192→   192→    orbitControls.maxDistance = 500
+   193→   193→    orbitControls.target.set(0, 0, 0)
+   194→   194→
+   195→   195→    // ================================================================
+   196→   196→    // Transform Controls (gizmo)
+   197→   197→    // ================================================================
+   198→   198→    let isTransforming = false
+   199→   199→    const transformControls = new TransformControls(camera, renderer.domElement)
+   200→   200→    transformControls.setSize(0.75)
+   201→   201→
+   202→   202→    // Disable orbit controls while using transform gizmo
+   203→   203→    transformControls.addEventListener('dragging-changed', (event) => {
+   204→   204→      orbitControls.enabled = !event.value
+   205→   205→    })
+   206→   206→
+   207→   207→    // Sync transform changes back to store
+   208→   208→    transformControls.addEventListener('objectChange', () => {
+   209→   209→      const obj = transformControls.object
+   210→   210→      if (!obj || !obj.userData.objectId) return
+   211→   211→
+   212→   212→      isTransforming = true
+   213→   213→      useGameEditorStore.getState().updateGameObject(obj.userData.objectId, {
+   214→   214→        position: {
+   215→   215→          x: parseFloat(obj.position.x.toFixed(6)),
+   216→   216→          y: parseFloat(obj.position.y.toFixed(6)),
+   217→   217→          z: parseFloat(obj.position.z.toFixed(6)),
+   218→   218→        },
+   219→   219→        rotation: {
+   220→   220→          x: parseFloat(obj.rotation.x.toFixed(6)),
+   221→   221→          y: parseFloat(obj.rotation.y.toFixed(6)),
+   222→   222→          z: parseFloat(obj.rotation.z.toFixed(6)),
+   223→   223→        },
+   224→   224→        scale: {
+   225→   225→          x: parseFloat(obj.scale.x.toFixed(6)),
+   226→   226→          y: parseFloat(obj.scale.y.toFixed(6)),
+   227→   227→          z: parseFloat(obj.scale.z.toFixed(6)),
+   228→   228→        },
+   229→   229→      })
+   230→   230→      isTransforming = false
+   231→   231→
+   232→   232→      // Keep box helper in sync during transform
+   233→   233→      if (boxHelper) {
+   234→   234→        boxHelper.update()
+   235→   235→      }
+   236→   236→    })
+   237→   237→
+   238→   238→    scene.add(transformControls)
+   239→   239→
+   240→   240→    // Set initial gizmo mode
+   241→   241→    const initialGizmoMode = initialState.editor.gizmoMode
+   242→   242→    transformControls.setMode(initialGizmoMode)
+   243→   243→
+   244→   244→    // ================================================================
+   245→   245→    // Lighting
+   246→   246→    // ================================================================
+   247→   247→    const sceneAmbientLight = new THREE.AmbientLight(
+   248→   248→      0xffffff,
+   249→   249→      initialScene?.environment.ambientLightIntensity ?? 0.4
+   250→   250→    )
+   251→   251→    scene.add(sceneAmbientLight)
+   252→   252→
+   253→   253→    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0)
+   254→   254→    directionalLight.position.set(5, 10, 7)
+   255→   255→    directionalLight.castShadow = true
+   256→   256→    directionalLight.shadow.mapSize.width = 2048
+   257→   257→    directionalLight.shadow.mapSize.height = 2048
+   258→   258→    directionalLight.shadow.camera.near = 0.5
+   259→   259→    directionalLight.shadow.camera.far = 50
+   260→   260→    directionalLight.shadow.camera.left = -15
+   261→   261→    directionalLight.shadow.camera.right = 15
+   262→   262→    directionalLight.shadow.camera.top = 15
+   263→   263→    directionalLight.shadow.camera.bottom = -15
+   264→   264→    directionalLight.shadow.bias = -0.0001
+   265→   265→    scene.add(directionalLight)
+   266→   266→
+   267→   267→    // ================================================================
+   268→   268→    // Helpers
+   269→   269→    // ================================================================
+   270→   270→    const gridHelper = new THREE.GridHelper(20, 20, 0x888888, 0x444444)
+   271→   271→    gridHelper.visible = initialState.editor.showGrid
+   272→   272→    scene.add(gridHelper)
+   273→   273→
+   274→   274→    const axesHelper = new THREE.AxesHelper(5)
+   275→   275→    axesHelper.visible = initialState.editor.showAxes
+   276→   276→    scene.add(axesHelper)
+   277→   277→
+   278→   278→    // ================================================================
+   279→   279→    // Raycaster for click selection
+   280→   280→    // ================================================================
+   281→   281→    const raycaster = new THREE.Raycaster()
+   282→   282→    const pointer = new THREE.Vector2()
+   283→   283→
+   284→   284→    // ================================================================
+   285→   285→    // Object tracking
+   286→   286→    // ================================================================
+   287→   287→    const objectMap = new Map<string, THREE.Object3D>() // id -> Three.js Object3D
+   288→   288→    const objectStateMap = new Map<string, string>() // id -> serialized visual state
+   289→   289→    let lastActiveSceneId: string | null = null
+   290→   290→    let boxHelper: THREE.BoxHelper | null = null
+   291→   291→
+   292→   292→    // Geometry cache (keyed by type — one geometry instance per type, reused across meshes)
+   293→   293→    const geometryCache = new Map<string, THREE.BufferGeometry>()
+   294→   294→
+   295→   295→    function getGeometry(type: GameObjectType): THREE.BufferGeometry | null {
+   296→   296→      const cached = geometryCache.get(type)
+   297→   297→      if (cached) return cached
+   298→   298→
+   299→   299→      const geo = createGeometryForType(type)
+   300→   300→      if (geo) {
+   301→   301→        geometryCache.set(type, geo)
+   302→   302→      }
+   303→   303→      return geo
+   304→   304→    }
+   305→   305→
+   306→   306→    // ================================================================
+   307→   307→    // Create / Update / Remove Three.js objects
+   308→   308→    // ================================================================
+   309→   309→
+   310→   310→    function createThreeObject(obj: GameObject3D): THREE.Object3D | null {
+   311→   311→      // ---- Light objects ----
+   312→   312→      if (isLightType(obj.type)) {
+   313→   313→        return createLightObject(obj)
+   314→   314→      }
+   315→   315→
+   316→   316→      // ---- Mesh objects ----
+   317→   317→      if (isMeshType(obj.type)) {
+   318→   318→        const geometry = getGeometry(obj.type)
+   319→   319→        if (!geometry) return null
+   320→   320→
+   321→   321→        const material = createMaterialForType(obj.material, obj.color)
+   322→   322→        const mesh = new THREE.Mesh(geometry, material)
+   323→   323→        applyObjectTransform(mesh, obj)
+   324→   324→        mesh.castShadow = obj.castShadow
+   325→   325→        mesh.receiveShadow = obj.receiveShadow
+   326→   326→        mesh.userData.objectId = obj.id
+   327→   327→        return mesh
+   328→   328→      }
+   329→   329→
+   330→   330→      // ---- Empty / Camera / Custom Model — invisible placeholder ----
+   331→   331→      const placeholder = new THREE.Object3D()
+   332→   332→      applyObjectTransform(placeholder, obj)
+   333→   333→      placeholder.userData.objectId = obj.id
+   334→   334→
+   335→   335→      // Add a small wireframe indicator for empties so they're visible in the editor
+   336→   336→      if (obj.type === 'empty') {
+   337→   337→        const indicatorGeo = new THREE.OctahedronGeometry(0.15)
+   338→   338→        const indicatorMat = new THREE.MeshBasicMaterial({
+   339→   339→          color: 0xffff00,
+   340→   340→          wireframe: true,
+   341→   341→        })
+   342→   342→        const indicatorMesh = new THREE.Mesh(indicatorGeo, indicatorMat)
+   343→   343→        placeholder.add(indicatorMesh)
+   344→   344→      }
+   345→   345→
+   346→   346→      return placeholder
+   347→   347→    }
+   348→   348→
+   349→   349→    function createLightObject(obj: GameObject3D): THREE.Object3D {
+   350→   350→      let light: THREE.Light
+   351→   351→
+   352→   352→      switch (obj.type) {
+   353→   353→        case 'directional_light': {
+   354→   354→          const dl = new THREE.DirectionalLight(new THREE.Color(obj.color), 1.0)
+   355→   355→          dl.castShadow = obj.castShadow
+   356→   356→          dl.shadow.mapSize.width = 1024
+   357→   357→          dl.shadow.mapSize.height = 1024
+   358→   358→          dl.shadow.camera.near = 0.5
+   359→   359→          dl.shadow.camera.far = 50
+   360→   360→          dl.shadow.camera.left = -10
+   361→   361→          dl.shadow.camera.right = 10
+   362→   362→          dl.shadow.camera.top = 10
+   363→   363→          dl.shadow.camera.bottom = -10
+   364→   364→          light = dl
+   365→   365→          break
+   366→   366→        }
+   367→   367→        case 'point_light': {
+   368→   368→          light = new THREE.PointLight(new THREE.Color(obj.color), 1.0, 50)
+   369→   369→          break
+   370→   370→        }
+   371→   371→        case 'spot_light': {
+   372→   372→          const sl = new THREE.SpotLight(
+   373→   373→            new THREE.Color(obj.color),
+   374→   374→            1.0,
+   375→   375→            50,
+   376→   376→            Math.PI / 6
+   377→   377→          )
+   378→   378→          sl.castShadow = obj.castShadow
+   379→   379→          light = sl
+   380→   380→          break
+   381→   381→        }
+   382→   382→        case 'ambient_light': {
+   383→   383→          light = new THREE.AmbientLight(new THREE.Color(obj.color), 0.5)
+   384→   384→          break
+   385→   385→        }
+   386→   386→        default: {
+   387→   387→          light = new THREE.AmbientLight(new THREE.Color(obj.color), 0.5)
+   388→   388→        }
+   389→   389→      }
+   390→   390→
+   391→   391→      light.position.set(obj.position.x, obj.position.y, obj.position.z)
+   392→   392→      light.visible = obj.visible
+   393→   393→      light.userData.objectId = obj.id
+   394→   394→
+   395→   395→      // Add a small wireframe sphere so lights are visible in the editor
+   396→   396→      const helperGeo = new THREE.SphereGeometry(0.15, 8, 8)
+   397→   397→      const helperMat = new THREE.MeshBasicMaterial({
+   398→   398→        color: new THREE.Color(obj.color),
+   399→   399→        wireframe: true,
+   400→   400→      })
+   401→   401→      const helperMesh = new THREE.Mesh(helperGeo, helperMat)
+   402→   402→      helperMesh.raycast = () => {} // make helper non-pickable
+   403→   403→      light.add(helperMesh)
+   404→   404→
+   405→   405→      return light
+   406→   406→    }
+   407→   407→
+   408→   408→    function applyObjectTransform(
+   409→   409→      obj: THREE.Object3D,
+   410→   410→      data: Pick<GameObject3D, 'position' | 'rotation' | 'scale' | 'visible'>
+   411→   411→    ): void {
+   412→   412→      obj.position.set(data.position.x, data.position.y, data.position.z)
+   413→   413→      obj.rotation.set(data.rotation.x, data.rotation.y, data.rotation.z)
+   414→   414→      obj.scale.set(data.scale.x, data.scale.y, data.scale.z)
+   415→   415→      obj.visible = data.visible
+   416→   416→    }
+   417→   417→
+   418→   418→    function updateThreeObject(threeObj: THREE.Object3D, obj: GameObject3D): void {
+   419→   419→      // Skip position/rotation/scale if TransformControls is currently modifying this object
+   420→   420→      if (!isTransforming || threeObj !== transformControls.object) {
+   421→   421→        applyObjectTransform(threeObj, obj)
+   422→   422→      }
+   423→   423→
+   424→   424→      // Update mesh properties
+   425→   425→      if (threeObj instanceof THREE.Mesh) {
+   426→   426→        threeObj.castShadow = obj.castShadow
+   427→   427→        threeObj.receiveShadow = obj.receiveShadow
+   428→   428→
+   429→   429→        const mat = threeObj.material
+   430→   430→        if (mat instanceof THREE.Material) {
+   431→   431→          if ('color' in mat && (mat as THREE.MeshStandardMaterial).color instanceof THREE.Color) {
+   432→   432→            ;(mat as THREE.MeshStandardMaterial).color.set(obj.color)
+   433→   433→          }
+   434→   434→          if ('wireframe' in mat) {
+   435→   435→            ;(mat as THREE.MeshBasicMaterial).wireframe = obj.material === 'wireframe'
+   436→   436→          }
+   437→   437→        }
+   438→   438→      }
+   439→   439→
+   440→   440→      // Update light properties
+   441→   441→      if (threeObj instanceof THREE.Light) {
+   442→   442→        if ('color' in threeObj && threeObj.color instanceof THREE.Color) {
+   443→   443→          threeObj.color.set(obj.color)
+   444→   444→        }
+   445→   445→        if ('castShadow' in threeObj) {
+   446→   446→          threeObj.castShadow = obj.castShadow
+   447→   447→        }
+   448→   448→        // Update helper sphere color
+   449→   449→        const helperChild = threeObj.children[0]
+   450→   450→        if (
+   451→   451→          helperChild instanceof THREE.Mesh &&
+   452→   452→          helperChild.material instanceof THREE.MeshBasicMaterial
+   453→   453→        ) {
+   454→   454→          helperChild.material.color.set(obj.color)
+   455→   455→        }
+   456→   456→      }
+   457→   457→    }
+   458→   458→
+   459→   459→    function disposeObject(obj: THREE.Object3D): void {
+   460→   460→      if (obj instanceof THREE.Mesh) {
+   461→   461→        // Do NOT dispose cached geometries — they are shared
+   462→   462→        if (obj.material instanceof THREE.Material) {
+   463→   463→          obj.material.dispose()
+   464→   464→        }
+   465→   465→      }
+   466→   466→      // Dispose child helper meshes (light indicators, empty indicators)
+   467→   467→      for (const child of obj.children) {
+   468→   468→        if (child instanceof THREE.Mesh) {
+   469→   469→          if (child.geometry) child.geometry.dispose()
+   470→   470→          if (child.material instanceof THREE.Material) child.material.dispose()
+   471→   471→        }
+   472→   472→      }
+   473→   473→    }
+   474→   474→
+   475→   475→    // ================================================================
+   476→   476→    // Sync objects from store → Three.js scene
+   477→   477→    // ================================================================
+   478→   478→
+   479→   479→    function syncObjects(): void {
+   480→   480→      const state = useGameEditorStore.getState()
+   481→   481→      const activeScene = selectActiveScene(state)
+   482→   482→
+   483→   483→      // If there's no active scene, clear everything
+   484→   484→      if (!activeScene) {
+   485→   485→        clearAllObjects()
+   486→   486→        return
+   487→   487→      }
+   488→   488→
+   489→   489→      // If the active scene changed, clear and rebuild
+   490→   490→      if (activeScene.id !== lastActiveSceneId) {
+   491→   491→        clearAllObjects()
+   492→   492→        lastActiveSceneId = activeScene.id
+   493→   493→      }
+   494→   494→
+   495→   495→      const currentObjects = activeScene.objects
+   496→   496→      const currentIds = new Set(currentObjects.map((o) => o.id))
+   497→   497→
+   498→   498→      // ---- Remove objects that no longer exist ----
+   499→   499→      for (const [id, threeObj] of objectMap) {
+   500→   500→        if (!currentIds.has(id)) {
+   501→   501→          // Detach transform controls if this was selected
+   502→   502→          if (transformControls.object === threeObj) {
+   503→   503→            transformControls.detach()
+   504→   504→          }
+   505→   505→          scene.remove(threeObj)
+   506→   506→          disposeObject(threeObj)
+   507→   507→          objectMap.delete(id)
+   508→   508→          objectStateMap.delete(id)
+   509→   509→        }
+   510→   510→      }
+   511→   511→
+   512→   512→      // ---- Add or update objects ----
+   513→   513→      for (const obj of currentObjects) {
+   514→   514→        const serialized = serializeVisualState(obj)
+   515→   515→        const existingObj = objectMap.get(obj.id)
+   516→   516→
+   517→   517→        if (!existingObj) {
+   518→   518→          // New object — create it
+   519→   519→          const threeObj = createThreeObject(obj)
+   520→   520→          if (threeObj) {
+   521→   521→            scene.add(threeObj)
+   522→   522→            objectMap.set(obj.id, threeObj)
+   523→   523→            objectStateMap.set(obj.id, serialized)
+   524→   524→          }
+   525→   525→        } else {
+   526→   526→          // Existing object — check if visual state changed
+   527→   527→          const prevSerialized = objectStateMap.get(obj.id)
+   528→   528→          if (prevSerialized !== serialized) {
+   529→   529→            // Check if type or material type changed — requires full recreation
+   530→   530→            const prevParsed = prevSerialized ? JSON.parse(prevSerialized) : null
+   531→   531→            if (prevParsed && (prevParsed.t !== obj.type || prevParsed.m !== obj.material)) {
+   532→   532→              // Type or material changed — remove old, create new
+   533→   533→              if (transformControls.object === existingObj) {
+   534→   534→                transformControls.detach()
+   535→   535→              }
+   536→   536→              scene.remove(existingObj)
+   537→   537→              disposeObject(existingObj)
+   538→   538→              const threeObj = createThreeObject(obj)
+   539→   539→              if (threeObj) {
+   540→   540→                scene.add(threeObj)
+   541→   541→                objectMap.set(obj.id, threeObj)
+   542→   542→                objectStateMap.set(obj.id, serialized)
+   543→   543→              }
+   544→   544→            } else {
+   545→   545→              // Just update properties in place
+   546→   546→              updateThreeObject(existingObj, obj)
+   547→   547→              objectStateMap.set(obj.id, serialized)
+   548→   548→            }
+   549→   549→          }
+   550→   550→        }
+   551→   551→      }
+   552→   552→
+   553→   553→      // Update selection visuals
+   554→   554→      updateSelection()
+   555→   555→    }
+   556→   556→
+   557→   557→    function clearAllObjects(): void {
+   558→   558→      if (transformControls.object) {
+   559→   559→        transformControls.detach()
+   560→   560→      }
+   561→   561→      for (const [id, threeObj] of objectMap) {
+   562→   562→        scene.remove(threeObj)
+   563→   563→        disposeObject(threeObj)
+   564→   564→      }
+   565→   565→      objectMap.clear()
+   566→   566→      objectStateMap.clear()
+   567→   567→      removeBoxHelper()
+   568→   568→    }
+   569→   569→
+   570→   570→    // ================================================================
+   571→   571→    // Selection
+   572→   572→    // ================================================================
+   573→   573→
+   574→   574→    function removeBoxHelper(): void {
+   575→   575→      if (boxHelper) {
+   576→   576→        scene.remove(boxHelper)
+   577→   577→        boxHelper.dispose()
+   578→   578→        boxHelper = null
+   579→   579→      }
+   580→   580→    }
+   581→   581→
+   582→   582→    function updateSelection(): void {
+   583→   583→      const currentSelectedId = useGameEditorStore.getState().editor.selectedObjectId
+   584→   584→
+   585→   585→      // Always remove old box helper first
+   586→   586→      removeBoxHelper()
+   587→   587→
+   588→   588→      if (currentSelectedId) {
+   589→   589→        const threeObj = objectMap.get(currentSelectedId)
+   590→   590→        if (threeObj) {
+   591→   591→          // Attach transform controls to the selected object
+   592→   592→          transformControls.attach(threeObj)
+   593→   593→
+   594→   594→          // Create a BoxHelper for the outline highlight
+   595→   595→          try {
+   596→   596→            boxHelper = new THREE.BoxHelper(threeObj, 0x00ff88)
+   597→   597→            boxHelper.raycast = () => {} // prevent box helper from being pickable
+   598→   598→            scene.add(boxHelper)
+   599→   599→          } catch {
+   600→   600→            // BoxHelper can fail on objects without geometry (e.g. pure Object3D)
+   601→   601→            boxHelper = null
+   602→   602→          }
+   603→   603→        } else {
+   604→   604→          transformControls.detach()
+   605→   605→        }
+   606→   606→      } else {
+   607→   607→        transformControls.detach()
+   608→   608→      }
+   609→   609→    }
+   610→   610→
+   611→   611→    // ================================================================
+   612→   612→    // Click / Pointer Selection
+   613→   613→    // ================================================================
+   614→   614→
+   615→   615→    function onPointerDown(event: PointerEvent): void {
+   616→   616→      // Don't process selection while dragging the transform gizmo
+   617→   617→      if (transformControls.dragging) return
+   618→   618→
+   619→   619→      const rect = renderer.domElement.getBoundingClientRect()
+   620→   620→      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
+   621→   621→      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
+   622→   622→
+   623→   623→      raycaster.setFromCamera(pointer, camera)
+   624→   624→
+   625→   625→      // Collect all pickable meshes (exclude helpers, gizmos, etc.)
+   626→   626→      const pickableMeshes: THREE.Mesh[] = []
+   627→   627→      objectMap.forEach((obj) => {
+   628→   628→        if (obj instanceof THREE.Mesh) {
+   629→   629→          pickableMeshes.push(obj)
+   630→   630→        }
+   631→   631→      })
+   632→   632→
+   633→   633→      const intersects = raycaster.intersectObjects(pickableMeshes, false)
+   634→   634→
+   635→   635→      if (intersects.length > 0) {
+   636→   636→        const hitObject = intersects[0].object
+   637→   637→        const objectId = hitObject.userData.objectId as string | undefined
+   638→   638→        if (objectId) {
+   639→   639→          useGameEditorStore.getState().selectObject(objectId)
+   640→   640→        }
+   641→   641→      } else {
+   642→   642→        // Click on empty space — deselect
+   643→   643→        useGameEditorStore.getState().selectObject(null)
+   644→   644→      }
+   645→   645→    }
+   646→   646→
+   647→   647→    renderer.domElement.addEventListener('pointerdown', onPointerDown)
+   648→   648→
+   649→   649→    // ================================================================
+   650→   650→    // Animation Loop
+   651→   651→    // ================================================================
+   652→   652→
+   653→   653→    let animFrameId = 0
+   654→   654→    let fpsFrameCount = 0
+   655→   655→    let fpsLastTime = performance.now()
+   656→   656→    let isViewportVisible = true
+   657→   657→
+   658→   658→    function animate(): void {
+   659→   659→      animFrameId = requestAnimationFrame(animate)
+   660→   660→
+   661→   661→      // Skip rendering when not visible
+   662→   662→      if (!isViewportVisible) return
+   663→   663→
+   664→   664→      orbitControls.update()
+   665→   665→
+   666→   666→      // Keep box helper updated (especially during transform)
+   667→   667→      if (boxHelper) {
+   668→   668→        boxHelper.update()
+   669→   669→      }
+   670→   670→
+   671→   671→      renderer.render(scene, camera)
+   672→   672→
+   673→   673→      // FPS calculation — update store once per second
+   674→   674→      fpsFrameCount++
+   675→   675→      const now = performance.now()
+   676→   676→      const elapsed = now - fpsLastTime
+   677→   677→      if (elapsed >= 1000) {
+   678→   678→        const fps = Math.round((fpsFrameCount * 1000) / elapsed)
+   679→   679→        useGameEditorStore.getState().setEditorState({ fps })
+   680→   680→        fpsFrameCount = 0
+   681→   681→        fpsLastTime = now
+   682→   682→      }
+   683→   683→    }
+   684→   684→
+   685→   685→    animate()
+   686→   686→
+   687→   687→    // ================================================================
+   688→   688→    // Resize Handling
+   689→   689→    // ================================================================
+   690→   690→
+   691→   691→    const resizeObserver = new ResizeObserver((entries) => {
+   692→   692→      for (const entry of entries) {
+   693→   693→        const { width, height } = entry.contentRect
+   694→   694→        if (width === 0 || height === 0) continue
+   695→   695→        camera.aspect = width / height
+   696→   696→        camera.updateProjectionMatrix()
+   697→   697→        renderer.setSize(width, height)
+   698→   698→      }
+   699→   699→    })
+   700→   700→    resizeObserver.observe(container)
+   701→   701→
+   702→   702→    // ================================================================
+   703→   703→    // Visibility (pause rendering when off-screen)
+   704→   704→    // ================================================================
+   705→   705→
+   706→   706→    const intersectionObserver = new IntersectionObserver(
+   707→   707→      (entries) => {
+   708→   708→        for (const entry of entries) {
+   709→   709→          isViewportVisible = entry.isIntersecting
+   710→   710→        }
+   711→   711→      },
+   712→   712→      { threshold: 0 }
+   713→   713→    )
+   714→   714→    intersectionObserver.observe(renderer.domElement)
+   715→   715→
+   716→   716→    function onDocumentVisibilityChange(): void {
+   717→   717→      isViewportVisible = !document.hidden
+   718→   718→    }
+   719→   719→    document.addEventListener('visibilitychange', onDocumentVisibilityChange)
+   720→   720→
+   721→   721→    // ================================================================
+   722→   722→    // Store Subscription — react to state changes imperatively
+   723→   723→    // ================================================================
+   724→   724→
+   725→   725→    const unsubscribe = useGameEditorStore.subscribe((state, prevState) => {
+   726→   726→      const activeScene = selectActiveScene(state)
+   727→   727→      const prevActiveScene = selectActiveScene(prevState)
+   728→   728→
+   729→   729→      // ---- Scene objects changed ----
+   730→   730→      const sceneChanged =
+   731→   731→        activeScene?.id !== prevActiveScene?.id ||
+   732→   732→        (activeScene !== undefined &&
+   733→   733→          prevActiveScene !== undefined &&
+   734→   734→          activeScene.objects !== prevActiveScene.objects)
+   735→   735→
+   736→   736→      if (sceneChanged) {
+   737→   737→        syncObjects()
+   738→   738→      }
+   739→   739→
+   740→   740→      // ---- Selection changed ----
+   741→   741→      if (state.editor.selectedObjectId !== prevState.editor.selectedObjectId) {
+   742→   742→        updateSelection()
+   743→   743→      }
+   744→   744→
+   745→   745→      // ---- Gizmo mode changed ----
+   746→   746→      if (state.editor.gizmoMode !== prevState.editor.gizmoMode) {
+   747→   747→        transformControls.setMode(state.editor.gizmoMode)
+   748→   748→      }
+   749→   749→
+   750→   750→      // ---- Grid visibility ----
+   751→   751→      if (state.editor.showGrid !== prevState.editor.showGrid) {
+   752→   752→        gridHelper.visible = state.editor.showGrid
+   753→   753→      }
+   754→   754→
+   755→   755→      // ---- Axes visibility ----
+   756→   756→      if (state.editor.showAxes !== prevState.editor.showAxes) {
+   757→   757→        axesHelper.visible = state.editor.showAxes
+   758→   758→      }
+   759→   759→
+   760→   760→      // ---- Background color ----
+   761→   761→      if (
+   762→   762→        activeScene &&
+   763→   763→        prevActiveScene &&
+   764→   764→        activeScene.environment.backgroundColor !==
+   765→   765→          prevActiveScene.environment.backgroundColor
+   766→   766→      ) {
+   767→   767→        scene.background = new THREE.Color(activeScene.environment.backgroundColor)
+   768→   768→      }
+   769→   769→
+   770→   770→      // ---- Fog ----
+   771→   771→      if (activeScene && prevActiveScene) {
+   772→   772→        const env = activeScene.environment
+   773→   773→        const prevEnv = prevActiveScene.environment
+   774→   774→        if (
+   775→   775→          env.fogEnabled !== prevEnv.fogEnabled ||
+   776→   776→          env.fogDensity !== prevEnv.fogDensity ||
+   777→   777→          env.fogColor !== prevEnv.fogColor
+   778→   778→        ) {
+   779→   779→          if (env.fogEnabled) {
+   780→   780→            scene.fog = new THREE.FogExp2(
+   781→   781→              new THREE.Color(env.fogColor),
+   782→   782→              env.fogDensity
+   783→   783→            )
+   784→   784→          } else {
+   785→   785→            scene.fog = null
+   786→   786→          }
+   787→   787→        }
+   788→   788→      }
+   789→   789→
+   790→   790→      // ---- Ambient light intensity ----
+   791→   791→      if (
+   792→   792→        activeScene &&
+   793→   793→        prevActiveScene &&
+   794→   794→        activeScene.environment.ambientLightIntensity !==
+   795→   795→          prevActiveScene.environment.ambientLightIntensity
+   796→   796→      ) {
+   797→   797→        sceneAmbientLight.intensity = activeScene.environment.ambientLightIntensity
+   798→   798→      }
+   799→   799→
+   800→   800→      // ---- Camera position (only update when not playing — avoid overriding user orbit) ----
+   801→   801→      if (
+   802→   802→        !state.editor.isPlaying &&
+   803→   803→        (state.editor.cameraPosition.x !== prevState.editor.cameraPosition.x ||
+   804→   804→          state.editor.cameraPosition.y !== prevState.editor.cameraPosition.y ||
+   805→   805→          state.editor.cameraPosition.z !== prevState.editor.cameraPosition.z)
+   806→   806→      ) {
+   807→   807→        camera.position.set(
+   808→   808→          state.editor.cameraPosition.x,
+   809→   809→          state.editor.cameraPosition.y,
+   810→   810→          state.editor.cameraPosition.z
+   811→   811→        )
+   812→   812→      }
+   813→   813→    })
+   814→   814→
+   815→   815→    // ---- Initial sync of objects from store ----
+   816→   816→    syncObjects()
+   817→   817→
+   818→   818→    // ================================================================
+   819→   819→    // Cleanup on unmount
+   820→   820→    // ================================================================
+   821→   821→
+   822→   822→    return () => {
+   823→   823→      // Stop animation loop
+   824→   824→      cancelAnimationFrame(animFrameId)
+   825→   825→
+   826→   826→      // Unsubscribe from store
+   827→   827→      unsubscribe()
+   828→   828→
+   829→   829→      // Disconnect observers
+   830→   830→      resizeObserver.disconnect()
+   831→   831→      intersectionObserver.disconnect()
+   832→   832→      document.removeEventListener('visibilitychange', onDocumentVisibilityChange)
+   833→   833→
+   834→   834→      // Remove event listeners
+   835→   835→      renderer.domElement.removeEventListener('pointerdown', onPointerDown)
+   836→   836→
+   837→   837→      // Detach transform controls
+   838→   838→      transformControls.detach()
+   839→   839→      transformControls.dispose()
+   840→   840→
+   841→   841→      // Dispose all tracked Three.js objects
+   842→   842→      for (const [, threeObj] of objectMap) {
+   843→   843→        scene.remove(threeObj)
+   844→   844→        disposeObject(threeObj)
+   845→   845→      }
+   846→   846→      objectMap.clear()
+   847→   847→      objectStateMap.clear()
+   848→   848→
+   849→   849→      // Remove box helper
+   850→   850→      removeBoxHelper()
+   851→   851→
+   852→   852→      // Dispose cached geometries
+   853→   853→      for (const [, geo] of geometryCache) {
+   854→   854→        geo.dispose()
+   855→   855→      }
+   856→   856→      geometryCache.clear()
+   857→   857→
+   858→   858→      // Dispose scene helpers
+   859→   859→      gridHelper.dispose()
+   860→   860→      axesHelper.dispose()
+   861→   861→
+   862→   862→      // Dispose renderer and remove canvas from DOM
+   863→   863→      renderer.dispose()
+   864→   864→      renderer.forceContextLoss()
+   865→   865→      if (container.contains(renderer.domElement)) {
+   866→   866→        container.removeChild(renderer.domElement)
+   867→   867→      }
+   868→   868→
+   869→   869→      // Dispose orbit controls
+   870→   870→      orbitControls.dispose()
+   871→   871→    }
+   872→   872→  }, [])
+   873→   873→
+   874→   874→  return (
+   875→   875→    <div
+   876→   876→      ref={containerRef}
+   877→   877→      className={className}
+   878→   878→      style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}
+   879→   879→    />
+   880→   880→  )
+   881→   881→}
+   882→   882→

@@ -1,0 +1,73 @@
+{
+  "name": "zengine-editor",
+  "version": "1.0.0",
+  "description": "ZEngine - Complete 3D Game Editor Engine with AI Assistant",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build:next": "next build",
+    "export:next": "next export -o out",
+    "build:electron": "electron-builder --publish never",
+    "build:win": "electron-builder --win --publish never",
+    "build:linux": "electron-builder --linux --publish never",
+    "build:all": "electron-builder --win --linux --publish never",
+    "dist": "npm run build:next && npm run export:next && npm run build:electron"
+  },
+  "build": {
+    "appId": "com.zengine.editor",
+    "productName": "ZEngine Editor",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      "out/**/*",
+      "public/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "public/logo.svg",
+      "artifactName": "ZEngine-Editor-${version}-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ZEngine Editor"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        },
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "public/logo.svg",
+      "category": "Development",
+      "maintainer": "ZEngine Team",
+      "artifactName": "zengine-editor-${version}-${arch}.${ext}"
+    },
+    "deb": {
+      "depends": ["libgtk-3-0", "libnotify4", "libnss3", "libxss1", "libxtst6", "xdg-utils"],
+      "packageCategory": "devel"
+    },
+    "appImage": {
+      "license": "MIT"
+    }
+  }
+}

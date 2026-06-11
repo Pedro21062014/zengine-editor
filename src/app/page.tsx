@@ -7,6 +7,7 @@ import Viewport3D from '@/components/editor/Viewport3D'
 import CodeEditorPanel from '@/components/editor/CodeEditorPanel'
 import AIPanel from '@/components/editor/AIPanel'
 import GamePreview from '@/components/editor/GamePreview'
+import ModelLibraryPanel from '@/components/editor/ModelLibraryPanel'
 import { Toolbar } from '@/components/editor/Toolbar'
 import {
   ResizableHandle,
@@ -19,6 +20,7 @@ import {
   Code2,
   Bot,
   Play,
+  Package,
 } from 'lucide-react'
 
 // ============================================================================
@@ -27,6 +29,7 @@ import {
 
 const editorTabs: { id: EditorTab; label: string; icon: React.ElementType }[] = [
   { id: 'scene', label: 'Scene', icon: Box },
+  { id: 'models', label: 'Models', icon: Package },
   { id: 'code', label: 'Code', icon: Code2 },
   { id: 'ai', label: 'AI', icon: Bot },
   { id: 'preview', label: 'Preview', icon: Play },
@@ -89,6 +92,10 @@ export default function Home() {
                   <Viewport3D className="w-full h-full" />
                 </ResizablePanel>
               </ResizablePanelGroup>
+            </TabsContent>
+
+            <TabsContent value="models" className="flex-1 m-0 overflow-hidden">
+              <ModelLibraryPanel />
             </TabsContent>
 
             <TabsContent value="code" className="flex-1 m-0 overflow-hidden">

@@ -4,6 +4,9 @@ import { useRef, useEffect } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import {
   useGameEditorStore,
   selectActiveScene,
@@ -327,7 +330,39 @@ export default function Viewport3D({ className }: Viewport3DProps) {
         return mesh
       }
 
-      // ---- Empty / Camera / Custom Model — invisible placeholder ----
+      // ---- Custom Model (loaded from API / local file) ----
+      if (obj.type === 'custom_model') {
+        const modelUrl = obj.properties?.modelUrl as string | undefined
+        const modelFormat = obj.properties?.modelFormat as string | undefined
+
+        // Create a container for the model
+        const container = new THREE.Object3D()
+        applyObjectTransform(container, obj)
+        container.userData.objectId = obj.id
+        container.userData.isCustomModel = true
+        container.userData.modelUrl = modelUrl || ''
+        container.userData.modelFormat = modelFormat || ''
+        container.userData.modelLoaded = false
+
+        // Add a loading indicator (wireframe box)
+        const loadingGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5)
+        const loadingMat = new THREE.MeshBasicMaterial({
+          color: 0x00d4aa,
+          wireframe: true,
+        })
+        const loadingMesh = new THREE.Mesh(loadingGeo, loadingMat)
+        loadingMesh.raycast = () => {} // non-pickable
+        container.add(loadingMesh)
+
+        // Load the model asynchronously
+        if (modelUrl) {
+          loadModelIntoContainer(container, modelUrl, modelFormat || 'glb', obj)
+        }
+
+        return container
+      }
+
+      // ---- Empty / Camera — invisible placeholder ----
       const placeholder = new THREE.Object3D()
       applyObjectTransform(placeholder, obj)
       placeholder.userData.objectId = obj.id
@@ -344,6 +379,153 @@ export default function Viewport3D({ className }: Viewport3DProps) {
       }
 
       return placeholder
+    }
+
+    // ---- Load 3D model into container ----
+    const modelLoadingSet = new Set<string>() // track URLs being loaded
+
+    function loadModelIntoContainer(
+      container: THREE.Object3D,
+      url: string,
+      format: string,
+      obj: GameObject3D
+    ): void {
+      // Avoid double-loading
+      const loadKey = `${obj.id}-${url}`
+      if (modelLoadingSet.has(loadKey)) return
+      modelLoadingSet.add(loadKey)
+
+      const onLoadComplete = (model: THREE.Object3D) => {
+        // Remove loading indicator
+        while (container.children.length > 0) {
+          const child = container.children[0]
+          container.remove(child)
+          if (child instanceof THREE.Mesh) {
+            child.geometry?.dispose()
+            if (child.material instanceof THREE.Material) child.material.dispose()
+          }
+        }
+
+        // Auto-scale model to fit within a reasonable size
+        const box = new THREE.Box3().setFromObject(model)
+        const size = box.getSize(new THREE.Vector3())
+        const maxDim = Math.max(size.x, size.y, size.z)
+        if (maxDim > 0 && maxDim !== Infinity) {
+          const targetSize = 2
+          const scaleFactor = targetSize / maxDim
+          model.scale.multiplyScalar(scaleFactor)
+
+          // Center the model
+          const center = box.getCenter(new THREE.Vector3())
+          model.position.sub(center.multiplyScalar(scaleFactor))
+        }
+
+        // Apply shadows to all meshes in the model
+        model.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            child.castShadow = obj.castShadow
+            child.receiveShadow = obj.receiveShadow
+            // Make meshes pickable for selection
+            child.userData.objectId = obj.id
+            child.userData.parentContainerId = obj.id
+          }
+        })
+
+        container.add(model)
+        container.userData.modelLoaded = true
+        modelLoadingSet.delete(loadKey)
+
+        useGameEditorStore.getState().addDebugMessage({
+          type: 'log',
+          message: `Model "${obj.name}" loaded successfully`,
+          source: 'Viewport3D',
+        })
+      }
+
+      const onError = (error: unknown) => {
+        modelLoadingSet.delete(loadKey)
+        const errMsg = error instanceof Error ? error.message : 'Unknown error'
+
+        // Change indicator to red to show error
+        while (container.children.length > 0) {
+          const child = container.children[0]
+          container.remove(child)
+          if (child instanceof THREE.Mesh) {
+            child.geometry?.dispose()
+            if (child.material instanceof THREE.Material) child.material.dispose()
+          }
+        }
+        const errorGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5)
+        const errorMat = new THREE.MeshBasicMaterial({
+          color: 0xff4444,
+          wireframe: true,
+        })
+        const errorMesh = new THREE.Mesh(errorGeo, errorMat)
+        errorMesh.raycast = () => {}
+        container.add(errorMesh)
+
+        useGameEditorStore.getState().addDebugMessage({
+          type: 'error',
+          message: `Failed to load model "${obj.name}": ${errMsg}`,
+          source: 'Viewport3D',
+        })
+      }
+
+      // Choose loader based on format
+      if (format === 'obj') {
+        const loader = new OBJLoader()
+        loader.load(
+          url,
+          (object) => {
+            // Wrap in a group for consistent handling
+            const wrapper = new THREE.Group()
+            wrapper.add(object)
+
+            // Apply standard material to OBJ meshes
+            object.traverse((child) => {
+              if (child instanceof THREE.Mesh) {
+                if (!child.material || child.material instanceof THREE.MeshBasicMaterial) {
+                  child.material = new THREE.MeshStandardMaterial({
+                    color: new THREE.Color(obj.color),
+                  })
+                }
+              }
+            })
+
+            onLoadComplete(wrapper)
+          },
+          undefined,
+          onError
+        )
+      } else {
+        // GLB / GLTF (default)
+        const gltfLoader = new GLTFLoader()
+
+        // Optional: Setup DRACO decoder for compressed models
+        const dracoLoader = new DRACOLoader()
+        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/')
+        gltfLoader.setDRACOLoader(dracoLoader)
+
+        gltfLoader.load(
+          url,
+          (gltf) => {
+            onLoadComplete(gltf.scene)
+          },
+          (progress) => {
+            if (progress.total > 0) {
+              const pct = Math.round((progress.loaded / progress.total) * 100)
+              if (pct % 25 === 0) {
+                useGameEditorStore.getState().addDebugMessage({
+                  type: 'info',
+                  message: `Loading "${obj.name}": ${pct}%`,
+                  source: 'Viewport3D',
+                })
+              }
+            }
+          },
+          onError
+        )
+      }
     }
 
     function createLightObject(obj: GameObject3D): THREE.Object3D {

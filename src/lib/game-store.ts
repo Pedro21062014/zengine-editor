@@ -138,7 +138,30 @@ export type DebugMessage = {
   source: string;
 };
 
-export type EditorTab = 'scene' | 'code' | 'ai' | 'preview';
+export type ModelFormat = 'glb' | 'gltf' | 'obj' | 'fbx' | 'stl';
+
+export type ModelAsset = {
+  id: string;
+  name: string;
+  description: string;
+  thumbnailUrl: string;
+  downloadUrl: string;
+  format: ModelFormat;
+  fileSize: number;
+  vertices: number;
+  author: string;
+  license: string;
+  source: 'sketchfab' | 'poly' | 'custom' | 'local';
+  tags: string[];
+};
+
+export type ModelAPIConfig = {
+  provider: 'sketchfab' | 'poly' | 'custom';
+  apiKey: string;
+  baseUrl: string;
+};
+
+export type EditorTab = 'scene' | 'code' | 'ai' | 'preview' | 'models';
 
 export type GizmoMode = 'translate' | 'rotate' | 'scale';
 
@@ -176,6 +199,9 @@ export type GameEditorStore = {
   codeFiles: CodeFile[];
   aiConfig: AIConfig;
   debugMessages: DebugMessage[];
+  modelAPIConfig: ModelAPIConfig;
+  importedModels: ModelAsset[];
+  isLoadingModel: boolean;
 
   // Snapshot for play mode — allows resetting the scene after stopping
   sceneSnapshot: SceneState | null;
@@ -213,6 +239,13 @@ export type GameEditorStore = {
   togglePlay: () => void;
   togglePause: () => void;
   resetScene: () => void;
+
+  // ---- Model API actions ----
+  setModelAPIConfig: (config: ModelAPIConfig) => void;
+  updateModelAPIConfig: (updates: Partial<ModelAPIConfig>) => void;
+  addImportedModel: (model: ModelAsset) => void;
+  removeImportedModel: (modelId: string) => void;
+  setIsLoadingModel: (loading: boolean) => void;
 };
 
 // ============================================================================
@@ -286,6 +319,12 @@ const defaultAIConfig: AIConfig = {
   systemPrompt: 'You are a helpful game development assistant.',
 };
 
+const defaultModelAPIConfig: ModelAPIConfig = {
+  provider: 'sketchfab',
+  apiKey: '',
+  baseUrl: 'https://api.sketchfab.com/v3',
+};
+
 // ============================================================================
 // Helper — deep clone for snapshots
 // ============================================================================
@@ -305,6 +344,9 @@ export const useGameEditorStore = create<GameEditorStore>((set, get) => ({
   codeFiles: [],
   aiConfig: { ...defaultAIConfig },
   debugMessages: [],
+  modelAPIConfig: { ...defaultModelAPIConfig },
+  importedModels: [],
+  isLoadingModel: false,
   sceneSnapshot: null,
 
   // ---- GameObject actions ----
@@ -697,6 +739,34 @@ export const useGameEditorStore = create<GameEditorStore>((set, get) => ({
         sceneSnapshot: null,
       };
     });
+  },
+
+  // ---- Model API actions ----
+
+  setModelAPIConfig: (config) => {
+    set({ modelAPIConfig: { ...config } });
+  },
+
+  updateModelAPIConfig: (updates) => {
+    set((state) => ({
+      modelAPIConfig: { ...state.modelAPIConfig, ...updates },
+    }));
+  },
+
+  addImportedModel: (model) => {
+    set((state) => ({
+      importedModels: [...state.importedModels, model],
+    }));
+  },
+
+  removeImportedModel: (modelId) => {
+    set((state) => ({
+      importedModels: state.importedModels.filter((m) => m.id !== modelId),
+    }));
+  },
+
+  setIsLoadingModel: (loading) => {
+    set({ isLoadingModel: loading });
   },
 }));
 

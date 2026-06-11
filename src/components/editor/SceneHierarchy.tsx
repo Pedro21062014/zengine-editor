@@ -60,6 +60,7 @@ import {
   ArrowDown,
   MoveRight,
   FolderPlus,
+  Package,
 } from 'lucide-react'
 
 // ============================================================================
@@ -92,6 +93,7 @@ const OBJECT_TYPES: Record<string, ObjectTypeConfig> = {
   ambient_light: { label: 'Ambient Light', icon: Sun, category: 'light' },
   camera: { label: 'Camera', icon: Camera, category: 'other' },
   empty: { label: 'Empty', icon: CircleDot, category: 'other' },
+  custom_model: { label: 'Custom Model', icon: Package, category: 'other' },
 }
 
 const DEFAULT_COLORS: Record<string, string> = {
@@ -114,6 +116,7 @@ const DEFAULT_COLORS: Record<string, string> = {
   ambient_light: '#fff9c4',
   camera: '#80cbc4',
   empty: '#bdbdbd',
+  custom_model: '#00d4aa',
 }
 
 const MESH_TYPES: GameObjectType[] = [
